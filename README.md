@@ -1,173 +1,75 @@
-# SSD: Single Shot MultiBox Object Detector, in PyTorch
-A [PyTorch](http://pytorch.org/) implementation of [Single Shot MultiBox Detector](http://arxiv.org/abs/1512.02325) from the 2016 paper by Wei Liu, Dragomir Anguelov, Dumitru Erhan, Christian Szegedy, Scott Reed, Cheng-Yang, and Alexander C. Berg.  The official and original Caffe code can be found [here](https://github.com/weiliu89/caffe/tree/ssd).
+# X光图像检测的数据不平衡问题
+------
+
+## 问题综述
+
+题目给出了安检的X光图片，目的是检测出给定的X光图片里是否有带电芯的充电宝或不带电芯的充电宝，若有需要得到充电宝的像素坐标位置。训练一个目标检测模型，使用这个目标检测模型检测出测试集中每张图片中的危险品（例如输入模型一张测试图片，最终输出这张图片中所有危险品的类别以及位置坐标）。
+
+此外，给定的数据集中存在数据不平衡问题，带电芯充电宝只有500张图片而不带电芯的充电宝有5000张图片，这样势必会导致训练的时候出现问题，比如将所有的疑似点都认成不带电芯的充电宝就可以得到很好的正确率。
+
+## 问题分析
+
+根据分析，题目是一个目标检测问题，当前的目标检测问题主流解决方法通常使用深度学习处理。目前大致可分为two-stage和one-stage两种。
+
+Two-stage，代表算法Fast-RCNN，Faster-RCNN等，主要原理是通过RPN产生一系列稀疏的候选框，对候选框进行分类或回归。准确率较高。One-stage，代表算法YOLO和SSD，主要原理是在图片的不同位置使用不同尺度和长宽比密集抽样，然后利用CNN提取特征直接分类或者回归。速度较快。**根据考虑后本组选择目前速度较快准确率较高的SSD方法作为处理方法。**
+
+对于数据不平衡问题，通常的解决方法有增加训练集，上采样或下采样，利用已知样本生成新样本增加训练集，通过改变损失函数减少不平衡问题影响。由于增加数据集这一选项不可取，下采样会减少训练集而上采样不能很好的解决问题，直接生成新样本效果未必理想且新生成的图像标注比较耗时。本组折中了上采样和生成新样本，**使用数据增强的方式增添训练集。**
+
+## 模型介绍
+
+### 结构
+
+Single Shot MultiBox Detector（SSD）是一种One-stage目标检测算法，它使用VGG16作为其backbone，具体结构如下图：
+
+![](https://github.com/Helixuan/SIXRay_Homework_ssd/blob/master/SSD_constructure.png)
+
+它在VGG-16的基础上进行修改，把之前的两个全连接层FC6，FC7改成$1\times1$和$3\times3$的卷积层，并且删掉dropout和全连接层FC8后添加了一系列卷积层训练。在多个feature map上做分类，最后使用NMS得到最后的结果。
+
+### 与其他算法的显著区别
+
+SSD的与YOLO等算法的不同点在于：
+
+1. 不同于YOLO在卷积层后接全连接层，相当于只使用了最高层的feature map，SSD采用金字塔结构，利用了多个卷积层上的feature map，在多个feature map上做分类和回归。通过这种方式使用感受野小的feature map检测小目标，使用感受野大的feature map检测更大目标。
+2. 借鉴了Faster-RCNN的anchor思想，使用了Prior Box，即一些目标的预选框，后续通过回归得到真实的目标位置，设定具体如下：
+
+|             | Min_size | Max_size |
+| :---------: | :------: | :------: |
+| **Conv4_3** |    30    |    60    |
+|   **Fc7**   |    60    |   111    |
+| **Conv6_2** |   111    |   162    |
+| **Conv7_2** |   162    |   213    |
+| **Conv8_2** |   213    |   264    |
+| **Conv9_2** |   264    |   315    |
+
+### 损失函数
+
+SSD设计了一种针对目标检测的损失函数multibox
+$$
+L(x,c,l,g)=\frac{1}{N}\left(L_{conf}(x,c)+\alpha L_{loc}(x,l,g)\right)
+$$
+损失函数是confidence loss(conf)和localization loss(loc)的加权相加。其中loc定义为预测框与ground truth的L1损失，conf采用softMax 损失函数。
+
+此外，可以使用Focal loss损失函数，该函数主要解决了负样本太多的问题，也就是说可以进一步解决样本不均衡的问题，由于时间有限还进行尝试。
+
+### 数据增强
+
+本组使用数据增强解决数据不平衡问题。主要采取的手段有
+
+- 直接使用原始的图像（即不进行变换）
+- 采样一个patch，保证与GT之间最小的IoU为：0.1，0.3，0.5，0.7 或 0.9
+- 完全随机的采样一个patch
+- 采样的patch占原始图像大小比例在[0.1,1]之间
+- 采样的patch的长宽比在[0.5,2]之间
+- 当 Ground truth box中心恰好在采样的patch中时，保留整个GT box
+- 最后每个patch被resize到固定大小，并且以0.5的概率随机的水平翻转
+
+## 结果发表
+
+训练
+
+最后结果：mAP : 0.8308 , core_AP : 0.7735 , careless_AP : 0.8880。
+
+![](https://github.com/Helixuan/SIXRay_Homework_ssd/blob/master/test_result.png)
 
 
-<img align="right" src= "https://github.com/amdegroot/ssd.pytorch/blob/master/doc/ssd.png" height = 400/>
 
-### Table of Contents
-- <a href='#installation'>Installation</a>
-- <a href='#datasets'>Datasets</a>
-- <a href='#training-ssd'>Train</a>
-- <a href='#evaluation'>Evaluate</a>
-- <a href='#performance'>Performance</a>
-- <a href='#demos'>Demos</a>
-- <a href='#todo'>Future Work</a>
-- <a href='#references'>Reference</a>
-
-&nbsp;
-&nbsp;
-&nbsp;
-&nbsp;
-
-## Installation
-- Install [PyTorch](http://pytorch.org/) by selecting your environment on the website and running the appropriate command.
-- Clone this repository.
-  * Note: We currently only support Python 3+.
-- Then download the dataset by following the [instructions](#datasets) below.
-- We now support [Visdom](https://github.com/facebookresearch/visdom) for real-time loss visualization during training!
-  * To use Visdom in the browser:
-  ```Shell
-  # First install Python server and client
-  pip install visdom
-  # Start the server (probably in a screen or tmux)
-  python -m visdom.server
-  ```
-  * Then (during training) navigate to http://localhost:8097/ (see the Train section below for training details).
-- Note: For training, we currently support [VOC](http://host.robots.ox.ac.uk/pascal/VOC/) and [COCO](http://mscoco.org/), and aim to add [ImageNet](http://www.image-net.org/) support soon.
-
-## Datasets
-To make things easy, we provide bash scripts to handle the dataset downloads and setup for you.  We also provide simple dataset loaders that inherit `torch.utils.data.Dataset`, making them fully compatible with the `torchvision.datasets` [API](http://pytorch.org/docs/torchvision/datasets.html).
-
-
-### COCO
-Microsoft COCO: Common Objects in Context
-
-##### Download COCO 2014
-```Shell
-# specify a directory for dataset to be downloaded into, else default is ~/data/
-sh data/scripts/COCO2014.sh
-```
-
-### VOC Dataset
-PASCAL VOC: Visual Object Classes
-
-##### Download VOC2007 trainval & test
-```Shell
-# specify a directory for dataset to be downloaded into, else default is ~/data/
-sh data/scripts/VOC2007.sh # <directory>
-```
-
-##### Download VOC2012 trainval
-```Shell
-# specify a directory for dataset to be downloaded into, else default is ~/data/
-sh data/scripts/VOC2012.sh # <directory>
-```
-
-## Training SSD
-- First download the fc-reduced [VGG-16](https://arxiv.org/abs/1409.1556) PyTorch base network weights at:              https://s3.amazonaws.com/amdegroot-models/vgg16_reducedfc.pth
-- By default, we assume you have downloaded the file in the `ssd.pytorch/weights` dir:
-
-```Shell
-mkdir weights
-cd weights
-wget https://s3.amazonaws.com/amdegroot-models/vgg16_reducedfc.pth
-```
-
-- To train SSD using the train script simply specify the parameters listed in `train.py` as a flag or manually change them.
-
-```Shell
-python train.py
-```
-
-- Note:
-  * For training, an NVIDIA GPU is strongly recommended for speed.
-  * For instructions on Visdom usage/installation, see the <a href='#installation'>Installation</a> section.
-  * You can pick-up training from a checkpoint by specifying the path as one of the training parameters (again, see `train.py` for options)
-
-## Evaluation
-To evaluate a trained network:
-
-```Shell
-python eval.py
-```
-
-You can specify the parameters listed in the `eval.py` file by flagging them or manually changing them.  
-
-
-<img align="left" src= "https://github.com/amdegroot/ssd.pytorch/blob/master/doc/detection_examples.png">
-
-## Performance
-
-#### VOC2007 Test
-
-##### mAP
-
-| Original | Converted weiliu89 weights | From scratch w/o data aug | From scratch w/ data aug |
-|:-:|:-:|:-:|:-:|
-| 77.2 % | 77.26 % | 58.12% | 77.43 % |
-
-##### FPS
-**GTX 1060:** ~45.45 FPS
-
-## Demos
-
-### Use a pre-trained SSD network for detection
-
-#### Download a pre-trained network
-- We are trying to provide PyTorch `state_dicts` (dict of weight tensors) of the latest SSD model definitions trained on different datasets.  
-- Currently, we provide the following PyTorch models:
-    * SSD300 trained on VOC0712 (newest PyTorch weights)
-      - https://s3.amazonaws.com/amdegroot-models/ssd300_mAP_77.43_v2.pth
-    * SSD300 trained on VOC0712 (original Caffe weights)
-      - https://s3.amazonaws.com/amdegroot-models/ssd_300_VOC0712.pth
-- Our goal is to reproduce this table from the [original paper](http://arxiv.org/abs/1512.02325)
-<p align="left">
-<img src="http://www.cs.unc.edu/~wliu/papers/ssd_results.png" alt="SSD results on multiple datasets" width="800px"></p>
-
-### Try the demo notebook
-- Make sure you have [jupyter notebook](http://jupyter.readthedocs.io/en/latest/install.html) installed.
-- Two alternatives for installing jupyter notebook:
-    1. If you installed PyTorch with [conda](https://www.continuum.io/downloads) (recommended), then you should already have it.  (Just  navigate to the ssd.pytorch cloned repo and run):
-    `jupyter notebook`
-
-    2. If using [pip](https://pypi.python.org/pypi/pip):
-
-```Shell
-# make sure pip is upgraded
-pip3 install --upgrade pip
-# install jupyter notebook
-pip install jupyter
-# Run this inside ssd.pytorch
-jupyter notebook
-```
-
-- Now navigate to `demo/demo.ipynb` at http://localhost:8888 (by default) and have at it!
-
-### Try the webcam demo
-- Works on CPU (may have to tweak `cv2.waitkey` for optimal fps) or on an NVIDIA GPU
-- This demo currently requires opencv2+ w/ python bindings and an onboard webcam
-  * You can change the default webcam in `demo/live.py`
-- Install the [imutils](https://github.com/jrosebr1/imutils) package to leverage multi-threading on CPU:
-  * `pip install imutils`
-- Running `python -m demo.live` opens the webcam and begins detecting!
-
-## TODO
-We have accumulated the following to-do list, which we hope to complete in the near future
-- Still to come:
-  * [x] Support for the MS COCO dataset
-  * [ ] Support for SSD512 training and testing
-  * [ ] Support for training on custom datasets
-
-## Authors
-
-* [**Max deGroot**](https://github.com/amdegroot)
-* [**Ellis Brown**](http://github.com/ellisbrown)
-
-***Note:*** Unfortunately, this is just a hobby of ours and not a full-time job, so we'll do our best to keep things up to date, but no guarantees.  That being said, thanks to everyone for your continued help and feedback as it is really appreciated. We will try to address everything as soon as possible.
-
-## References
-- Wei Liu, et al. "SSD: Single Shot MultiBox Detector." [ECCV2016]((http://arxiv.org/abs/1512.02325)).
-- [Original Implementation (CAFFE)](https://github.com/weiliu89/caffe/tree/ssd)
-- A huge thank you to [Alex Koltun](https://github.com/alexkoltun) and his team at [Webyclip](http://www.webyclip.com) for their help in finishing the data augmentation portion.
-- A list of other great SSD ports that were sources of inspiration (especially the Chainer repo):
-  * [Chainer](https://github.com/Hakuyume/chainer-ssd), [Keras](https://github.com/rykov8/ssd_keras), [MXNet](https://github.com/zhreshold/mxnet-ssd), [Tensorflow](https://github.com/balancap/SSD-Tensorflow)
