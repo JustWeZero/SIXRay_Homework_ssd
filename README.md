@@ -21,7 +21,7 @@ Two-stage，代表算法Fast-RCNN，Faster-RCNN等，主要原理是通过RPN产
 
 Single Shot MultiBox Detector（SSD）是一种One-stage目标检测算法，它使用VGG16作为其backbone，具体结构如下图：
 
-![](https://github.com/Helixuan/ssd.pytorch/raw/master/SSD_constructure.png)
+![](https://github.com/Helixuan/SIXRay_Homework_ssd/blob/master/SSD_constructure.png)
 
 它在VGG-16的基础上进行修改，把之前的两个全连接层FC6，FC7改成$1\times1$和$3\times3$的卷积层，并且删掉dropout和全连接层FC8后添加了一系列卷积层训练。在多个feature map上做分类，最后使用NMS得到最后的结果。
 
@@ -69,7 +69,7 @@ $$
 
 最后结果：mAP : 0.8308 , core_AP : 0.7735 , careless_AP : 0.8880。
 
-![](https://github.com/Helixuan/ssd.pytorch/raw/master/test_result.png)
+![](https://github.com/Helixuan/SIXRay_Homework_ssd/blob/master/test_result.png)
 
 
 
